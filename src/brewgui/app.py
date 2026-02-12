@@ -17,6 +17,7 @@ class InstallTask:
         self.thread = None
         self.progress_value = 0
         self.output_lines = []
+        self.max_log_lines = 200  # 只保留最后 200 行，防止卡顿
         self.create_ui()
 
     def create_ui(self):
@@ -33,14 +34,19 @@ class InstallTask:
         self.status.pack(side="right", anchor="e")
 
         self.progress = ttk.Progressbar(self.frame, maximum=100)
-        self.progress.pack(fill="x", pady=6)
+        self.progress.pack(fill="x", pady=(6, 4))
 
-        self.log_btn = tk.Button(self.frame, text="查看日志", command=self.show_log)
-        self.log_btn.pack(anchor="e")
-
-    def show_log(self):
-        text = "\n".join(self.output_lines[-200:]) if self.output_lines else "(暂无输出)"
-        messagebox.showinfo(f"{self.package} 输出", text)
+        # 进度条下方直接显示日志
+        self.log_text = tk.Text(
+            self.frame,
+            height=6,
+            wrap="word",
+            font=("Menlo", 11),
+            relief="flat",
+            bg=self.frame.cget("bg"),
+        )
+        self.log_text.pack(fill="x", pady=(0, 2))
+        self.log_text.config(state="disabled")
 
     def start(self):
         self.thread = threading.Thread(target=self.run, daemon=True)
@@ -59,6 +65,14 @@ class InstallTask:
             for line in self.process.stdout:
                 line = line.rstrip("\n")
                 self.output_lines.append(line)
+
+                # 只保留最后 max_log_lines 行（避免 output_lines 无限增长）
+                if len(self.output_lines) > self.max_log_lines:
+                    self.output_lines = self.output_lines[-self.max_log_lines:]
+
+                # 追加到界面日志
+                self.append_log(line)
+
                 self.simulate_progress(line)
 
             self.process.wait()
@@ -72,6 +86,9 @@ class InstallTask:
 
         except Exception as e:
             self.output_lines.append(f"Exception: {e}")
+            if len(self.output_lines) > self.max_log_lines:
+                self.output_lines = self.output_lines[-self.max_log_lines:]
+            self.append_log(f"Exception: {e}")
             self.update_status("异常", "red")
             self.update_progress(100)
 
@@ -79,6 +96,23 @@ class InstallTask:
             # 完成/失败后：从中间移除 + 刷新右侧已安装列表
             self.app.root.after(0, self.frame.destroy)
             self.app.load_installed_packages()
+
+    def append_log(self, line: str):
+        """线程安全地把日志追加到 Text，并保持滚动到底部。"""
+        def _ui():
+            self.log_text.config(state="normal")
+            self.log_text.insert("end", line + "\n")
+
+            # 只保留最后 max_log_lines 行（界面里也裁剪）
+            current_lines = int(self.log_text.index("end-1c").split(".")[0])
+            extra = current_lines - self.max_log_lines
+            if extra > 0:
+                self.log_text.delete("1.0", f"{extra + 1}.0")
+
+            self.log_text.see("end")
+            self.log_text.config(state="disabled")
+
+        self.app.root.after(0, _ui)
 
     def simulate_progress(self, line):
         l = line.lower()
@@ -107,8 +141,8 @@ class InstallTask:
 class BrewApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("BrewGUI 三列版")
-        self.root.geometry("1200x600")
+        self.root.title("BrewGUI")
+
         self.tasks = []
         self.all_packages = []
         self.create_ui()
@@ -458,5 +492,21 @@ class BrewApp:
 
 def run_app():
     root = tk.Tk()
+
+    # ✅ 启动时就居中（无“先出现再移动”的跳动）
+    root.withdraw()
+    width, height = 800, 600
+    screen_w = root.winfo_screenwidth()
+    screen_h = root.winfo_screenheight()
+    x = (screen_w - width) // 2
+    y = (screen_h - height) // 2
+    root.geometry(f"{width}x{height}+{x}+{y}")
+
     BrewApp(root)
+
+    root.deiconify()
     root.mainloop()
+
+
+if __name__ == '__main__':
+    run_app()
