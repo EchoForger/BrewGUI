@@ -4,6 +4,7 @@ import subprocess
 import threading
 import random
 
+
 # ==============================
 # 单个安装任务
 # ==============================
@@ -38,7 +39,6 @@ class InstallTask:
         self.log_btn.pack(anchor="e")
 
     def show_log(self):
-        # 展示最近输出，避免过长
         text = "\n".join(self.output_lines[-200:]) if self.output_lines else "(暂无输出)"
         messagebox.showinfo(f"{self.package} 输出", text)
 
@@ -81,7 +81,6 @@ class InstallTask:
             self.app.load_installed_packages()
 
     def simulate_progress(self, line):
-        # 仅用于“估算进度”，brew 输出不稳定，所以做轻量模拟
         l = line.lower()
         if "downloading" in l:
             self.progress_value += 8
@@ -148,23 +147,24 @@ class BrewApp:
         # 中列：正在下载（任务卡片）
         tk.Label(self.center_frame, text="正在下载", font=("Arial", 12, "bold")).pack(anchor="w")
 
-        # 用 Canvas + Scrollbar 做可滚动任务区
+        # Canvas + Scrollbar：可滚动任务区
         self.center_canvas = tk.Canvas(self.center_frame, highlightthickness=0)
         self.center_canvas.pack(side="left", fill="both", expand=True)
 
-        self.center_scrollbar = tk.Scrollbar(self.center_frame, orient="vertical", command=self.center_canvas.yview)
+        self.center_scrollbar = ttk.Scrollbar(self.center_frame, orient="vertical", command=self.center_canvas.yview)
         self.center_scrollbar.pack(side="right", fill="y")
 
         self.center_canvas.configure(yscrollcommand=self.center_scrollbar.set)
 
         self.center_tasks_container = tk.Frame(self.center_canvas)
-        self.center_window_id = self.center_canvas.create_window((0, 0), window=self.center_tasks_container, anchor="nw")
+        self.center_window_id = self.center_canvas.create_window(
+            (0, 0), window=self.center_tasks_container, anchor="nw"
+        )
 
         def _on_container_configure(event):
             self.center_canvas.configure(scrollregion=self.center_canvas.bbox("all"))
 
         def _on_canvas_configure(event):
-            # 让内部 frame 宽度跟随 canvas
             self.center_canvas.itemconfigure(self.center_window_id, width=event.width)
 
         self.center_tasks_container.bind("<Configure>", _on_container_configure)
@@ -180,10 +180,16 @@ class BrewApp:
         btn_row = tk.Frame(self.right_frame)
         btn_row.pack(fill="x", pady=4)
 
-        tk.Button(btn_row, text="卸载选中", command=self.uninstall_selected).pack(side="left", expand=True, fill="x", padx=2)
-        tk.Button(btn_row, text="更新选中", command=self.update_selected).pack(side="left", expand=True, fill="x", padx=2)
+        tk.Button(btn_row, text="卸载选中", command=self.uninstall_selected).pack(
+            side="left", expand=True, fill="x", padx=2
+        )
+        tk.Button(btn_row, text="更新选中", command=self.update_selected).pack(
+            side="left", expand=True, fill="x", padx=2
+        )
 
-        tk.Button(self.right_frame, text="刷新已安装列表", command=self.load_installed_packages).pack(fill="x", pady=4)
+        tk.Button(self.right_frame, text="刷新已安装列表", command=self.load_installed_packages).pack(
+            fill="x", pady=4
+        )
 
     # --------------------------
     # 后台线程执行
@@ -247,7 +253,7 @@ class BrewApp:
             messagebox.showwarning("提示", "请选择软件")
             return
 
-        # 防止重复安装显示（可选）
+        # 防止重复安装（可选）
         for t in self.tasks:
             if getattr(t, "package", None) == package and t.thread and t.thread.is_alive():
                 messagebox.showinfo("提示", f"{package} 正在安装中")
@@ -309,7 +315,142 @@ class BrewApp:
         self.run_in_thread(task)
 
     # --------------------------
-    # 显示软件信息
+    # brew info 美化显示
+    # --------------------------
+    def parse_brew_info(self, raw: str):
+        """
+        将 brew info 输出解析为:
+        - summary: 头部非 '==>' 开头的行
+        - sections: {section_name: [lines]}
+        """
+        lines = raw.splitlines()
+        summary = []
+        sections = {}
+        current = None
+
+        for line in lines:
+            if line.startswith("==>"):
+                title = line.replace("==>", "").strip()
+                current = title if title else "Other"
+                sections.setdefault(current, [])
+            else:
+                if current is None:
+                    if line.strip():
+                        summary.append(line)
+                else:
+                    sections[current].append(line)
+
+        return summary, sections
+
+    def show_info_window(self, package: str, raw: str):
+        summary, sections = self.parse_brew_info(raw)
+
+        win = tk.Toplevel(self.root)
+        win.title(f"软件信息 - {package}")
+        win.geometry("780x520")
+        win.minsize(680, 420)
+
+        style = ttk.Style(win)
+        try:
+            style.configure("Card.TLabelframe", padding=10)
+            style.configure("Card.TLabelframe.Label", font=("Arial", 12, "bold"))
+        except tk.TclError:
+            pass
+
+        header = tk.Frame(win, padx=12, pady=10)
+        header.pack(fill="x")
+
+        tk.Label(header, text=package, font=("Arial", 16, "bold")).pack(side="left")
+
+        btns = tk.Frame(header)
+        btns.pack(side="right")
+
+        def copy_all():
+            self.root.clipboard_clear()
+            self.root.clipboard_append(raw)
+
+        ttk.Button(btns, text="复制全部", command=copy_all).pack(side="left", padx=4)
+        ttk.Button(btns, text="关闭", command=win.destroy).pack(side="left", padx=4)
+
+        outer = tk.Frame(win)
+        outer.pack(fill="both", expand=True, padx=12, pady=(0, 12))
+
+        canvas = tk.Canvas(outer, highlightthickness=0)
+        canvas.pack(side="left", fill="both", expand=True)
+
+        scrollbar = ttk.Scrollbar(outer, orient="vertical", command=canvas.yview)
+        scrollbar.pack(side="right", fill="y")
+
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        content = tk.Frame(canvas)
+        window_id = canvas.create_window((0, 0), window=content, anchor="nw")
+
+        def _on_content_configure(event):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+
+        def _on_canvas_configure(event):
+            canvas.itemconfigure(window_id, width=event.width)
+
+        content.bind("<Configure>", _on_content_configure)
+        canvas.bind("<Configure>", _on_canvas_configure)
+
+        # 鼠标滚轮支持
+        def _on_mousewheel(e):
+            if e.delta:
+                canvas.yview_scroll(int(-1 * (e.delta / 120)), "units")
+            else:
+                if e.num == 4:
+                    canvas.yview_scroll(-3, "units")
+                elif e.num == 5:
+                    canvas.yview_scroll(3, "units")
+
+        win.bind_all("<MouseWheel>", _on_mousewheel)
+        win.bind_all("<Button-4>", _on_mousewheel)
+        win.bind_all("<Button-5>", _on_mousewheel)
+
+        def add_block(title_text: str, body_lines):
+            lf = ttk.LabelFrame(content, text=title_text, style="Card.TLabelframe")
+            lf.pack(fill="x", pady=8)
+
+            body = "\n".join(body_lines).strip() if body_lines else "(空)"
+
+            # 用 Text 主要为了支持自动换行 + 可复制
+            txt = tk.Text(
+                lf,
+                height=min(max(len(body_lines), 2), 12),
+                wrap="word",
+                font=("Menlo", 12),
+                relief="flat",
+                bg=win.cget("bg"),
+            )
+            txt.pack(fill="x")
+            txt.insert("1.0", body)
+            txt.config(state="disabled")
+
+        # Summary
+        if summary:
+            add_block("Summary", summary)
+
+        # brew 的第一段一般是 "pkg: version"（带冒号），作为 Header 段
+        header_sections = [k for k in sections.keys() if ":" in k]
+        for k in header_sections:
+            add_block(k, [ln for ln in sections[k] if ln.strip()])
+
+        # 常见段落优先顺序
+        for k in ["Names", "Description", "Artifacts", "Analytics"]:
+            if k in sections:
+                add_block(k, [ln for ln in sections[k] if ln.strip()])
+
+        # 其它段落兜底
+        for k, v in sections.items():
+            if (k in header_sections) or (k in ["Names", "Description", "Artifacts", "Analytics"]):
+                continue
+            if v and any(ln.strip() for ln in v):
+                add_block(k, [ln for ln in v if ln.strip()])
+
+    # --------------------------
+    # 显示软件信息（双击）
     # --------------------------
     def show_info(self, listbox):
         try:
@@ -321,7 +462,7 @@ class BrewApp:
         def task():
             try:
                 result = subprocess.check_output(f"brew info {package}", shell=True, text=True)
-                self.root.after(0, lambda: messagebox.showinfo(package, result))
+                self.root.after(0, lambda: self.show_info_window(package, result))
             except Exception as e:
                 self.root.after(0, lambda: messagebox.showerror("错误", str(e)))
 
