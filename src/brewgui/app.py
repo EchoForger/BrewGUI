@@ -107,7 +107,7 @@ class InstallTask:
 class BrewApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("PyBrew 三列版")
+        self.root.title("BrewGUI 三列版")
         self.root.geometry("1200x600")
         self.tasks = []
         self.all_packages = []
@@ -318,11 +318,6 @@ class BrewApp:
     # brew info 美化显示
     # --------------------------
     def parse_brew_info(self, raw: str):
-        """
-        将 brew info 输出解析为:
-        - summary: 头部非 '==>' 开头的行
-        - sections: {section_name: [lines]}
-        """
         lines = raw.splitlines()
         summary = []
         sections = {}
@@ -380,7 +375,6 @@ class BrewApp:
 
         scrollbar = ttk.Scrollbar(outer, orient="vertical", command=canvas.yview)
         scrollbar.pack(side="right", fill="y")
-
         canvas.configure(yscrollcommand=scrollbar.set)
 
         content = tk.Frame(canvas)
@@ -395,7 +389,6 @@ class BrewApp:
         content.bind("<Configure>", _on_content_configure)
         canvas.bind("<Configure>", _on_canvas_configure)
 
-        # 鼠标滚轮支持
         def _on_mousewheel(e):
             if e.delta:
                 canvas.yview_scroll(int(-1 * (e.delta / 120)), "units")
@@ -414,8 +407,6 @@ class BrewApp:
             lf.pack(fill="x", pady=8)
 
             body = "\n".join(body_lines).strip() if body_lines else "(空)"
-
-            # 用 Text 主要为了支持自动换行 + 可复制
             txt = tk.Text(
                 lf,
                 height=min(max(len(body_lines), 2), 12),
@@ -428,21 +419,17 @@ class BrewApp:
             txt.insert("1.0", body)
             txt.config(state="disabled")
 
-        # Summary
         if summary:
             add_block("Summary", summary)
 
-        # brew 的第一段一般是 "pkg: version"（带冒号），作为 Header 段
         header_sections = [k for k in sections.keys() if ":" in k]
         for k in header_sections:
             add_block(k, [ln for ln in sections[k] if ln.strip()])
 
-        # 常见段落优先顺序
         for k in ["Names", "Description", "Artifacts", "Analytics"]:
             if k in sections:
                 add_block(k, [ln for ln in sections[k] if ln.strip()])
 
-        # 其它段落兜底
         for k, v in sections.items():
             if (k in header_sections) or (k in ["Names", "Description", "Artifacts", "Analytics"]):
                 continue
@@ -469,7 +456,7 @@ class BrewApp:
         self.run_in_thread(task)
 
 
-if __name__ == "__main__":
+def run_app():
     root = tk.Tk()
-    app = BrewApp(root)
+    BrewApp(root)
     root.mainloop()
