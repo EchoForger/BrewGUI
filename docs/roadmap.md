@@ -6,6 +6,8 @@
 - Homebrew status check
 - Installed package listing
 - Manual refresh flow
+- Selected package details
+- Install, upgrade, uninstall, and cleanup actions
 
 ## Milestone 2
 
@@ -20,4 +22,3 @@
 - Background job progress
 - Export diagnostics
 - Native macOS packaging
-
