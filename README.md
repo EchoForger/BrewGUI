@@ -1,0 +1,58 @@
+# Brew GUI Manager
+
+`Brew GUI Manager` is a Python desktop application scaffold for managing Homebrew from a graphical interface.
+
+## Goals
+
+- View Homebrew environment status
+- Search installed formulae and casks
+- Trigger common actions such as refresh, install, upgrade, and cleanup
+- Keep the architecture simple enough for rapid iteration
+
+## Tech Choices
+
+- Python 3.11+
+- `tkinter` for the initial desktop UI
+- `subprocess` to call the `brew` CLI
+
+## Quick Start
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev]"
+python -m brew_gui_manager
+```
+
+Or run:
+
+```bash
+brew-gui
+```
+
+## Project Structure
+
+```text
+.
+├── AGENT.md
+├── README.md
+├── docs/
+│   └── roadmap.md
+├── pyproject.toml
+├── src/
+│   └── brew_gui_manager/
+│       ├── __init__.py
+│       ├── app.py
+│       ├── brew_service.py
+│       └── main.py
+└── tests/
+    └── test_brew_service.py
+```
+
+## Next Suggestions
+
+- Add install and uninstall dialogs
+- Parse `brew info --json=v2` for richer metadata
+- Introduce background tasks for long-running operations
+- Package the app for macOS distribution
+
