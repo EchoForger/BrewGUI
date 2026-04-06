@@ -68,6 +68,7 @@ brew-gui
 - Uninstall the selected formula or cask with confirmation
 - View package details from `brew info`
 - Inspect a simple in-app command log
+- Run refreshes and package actions in background workers so the UI stays responsive
 
 ## Repository Guidance
 

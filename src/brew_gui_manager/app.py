@@ -3,8 +3,10 @@ from __future__ import annotations
 import tkinter as tk
 from tkinter import messagebox
 from tkinter import ttk
+from typing import Callable
 
 from .brew_service import BrewCommandResult, BrewService, BrewSnapshot
+from .task_runner import BackgroundTaskRunner, TaskEvent
 from .ui_state import PackageSelection
 
 
@@ -30,17 +32,23 @@ class BrewManagerApp:
         self.badge_var = tk.StringVar(value="No updates available")
         self.hero_var = tk.StringVar(value="Your Homebrew apps, curated like a storefront.")
         self.category_var = tk.StringVar(value="all")
+        self.activity_var = tk.StringVar(value="Idle")
 
         self._all_formulae: list[str] = []
         self._all_casks: list[str] = []
         self._outdated_formulae: list[str] = []
         self._outdated_casks: list[str] = []
         self._selected_package: PackageSelection | None = None
+        self._task_runner = BackgroundTaskRunner()
+        self._task_handlers: dict[int, tuple[Callable[[object], None] | None, Callable[[Exception], None] | None]] = {}
+        self._active_tasks: set[int] = set()
+        self._action_buttons: list[ttk.Button] = []
 
         self._configure_styles()
         self._build_layout()
         self.filter_var.trace_add("write", lambda *_: self._apply_filter())
         self.root.after(50, self.refresh)
+        self.root.after(120, self._poll_task_events)
 
     def _configure_styles(self) -> None:
         style = ttk.Style()
@@ -168,6 +176,11 @@ class BrewManagerApp:
             text="A Homebrew control center styled like an app marketplace.",
             style="Muted.TLabel",
         ).grid(row=1, column=0, sticky="w", pady=(4, 0))
+        ttk.Label(
+            header,
+            textvariable=self.activity_var,
+            style="Muted.TLabel",
+        ).grid(row=0, column=1, sticky="e")
 
         self._build_hero(content)
         self._build_storefront(content)
@@ -213,12 +226,14 @@ class BrewManagerApp:
             state="readonly",
         )
         kind_box.pack(fill=tk.X, pady=(10, 10))
-        ttk.Button(
+        install_button = ttk.Button(
             install_card,
             text="Install Package",
             style="Primary.TButton",
             command=self._install_package,
-        ).pack(fill=tk.X)
+        )
+        install_button.pack(fill=tk.X)
+        self._register_action_button(install_button)
 
         stats_card = ttk.Frame(parent, style="SoftCard.TFrame", padding=14)
         stats_card.pack(fill=tk.X, pady=(18, 0))
@@ -262,16 +277,20 @@ class BrewManagerApp:
         controls = ttk.Frame(left, style="Hero.TFrame")
         controls.pack(anchor="w")
         ttk.Entry(controls, textvariable=self.filter_var, width=34).grid(row=0, column=0, padx=(0, 10))
-        ttk.Button(controls, text="Refresh", style="Primary.TButton", command=self.refresh).grid(
+        refresh_button = ttk.Button(controls, text="Refresh", style="Primary.TButton", command=self.refresh)
+        refresh_button.grid(
             row=0,
             column=1,
         )
-        ttk.Button(
+        self._register_action_button(refresh_button)
+        upgrade_all_button = ttk.Button(
             controls,
             text="Upgrade All",
             style="Secondary.TButton",
             command=self._upgrade_all,
-        ).grid(row=0, column=2, padx=(10, 0))
+        )
+        upgrade_all_button.grid(row=0, column=2, padx=(10, 0))
+        self._register_action_button(upgrade_all_button)
 
         right = ttk.Frame(hero, style="Hero.TFrame")
         right.grid(row=0, column=1, sticky="nsew")
@@ -351,28 +370,36 @@ class BrewManagerApp:
 
         actions = ttk.Frame(details, style="Card.TFrame")
         actions.grid(row=3, column=0, sticky="w", pady=(18, 16))
-        ttk.Button(actions, text="Open Details", style="Primary.TButton", command=self._show_selected_details).grid(
+        details_button = ttk.Button(actions, text="Open Details", style="Primary.TButton", command=self._show_selected_details)
+        details_button.grid(
             row=0,
             column=0,
         )
-        ttk.Button(
+        self._register_action_button(details_button)
+        upgrade_selected_button = ttk.Button(
             actions,
             text="Upgrade Selected",
             style="Secondary.TButton",
             command=self._upgrade_selected,
-        ).grid(row=0, column=1, padx=(10, 0))
-        ttk.Button(
+        )
+        upgrade_selected_button.grid(row=0, column=1, padx=(10, 0))
+        self._register_action_button(upgrade_selected_button)
+        uninstall_button = ttk.Button(
             actions,
             text="Uninstall",
             style="Secondary.TButton",
             command=self._uninstall_selected,
-        ).grid(row=0, column=2, padx=(10, 0))
-        ttk.Button(
+        )
+        uninstall_button.grid(row=0, column=2, padx=(10, 0))
+        self._register_action_button(uninstall_button)
+        cleanup_button = ttk.Button(
             actions,
             text="Cleanup",
             style="Secondary.TButton",
             command=self._cleanup,
-        ).grid(row=0, column=3, padx=(10, 0))
+        )
+        cleanup_button.grid(row=0, column=3, padx=(10, 0))
+        self._register_action_button(cleanup_button)
 
         ttk.Label(details, text="About This Package", style="Section.TLabel").grid(
             row=4,
@@ -462,8 +489,11 @@ class BrewManagerApp:
         return listbox
 
     def refresh(self) -> None:
-        snapshot = self.service.collect_snapshot()
-        self._render_snapshot(snapshot)
+        self._submit_task(
+            description="Refreshing storefront",
+            fn=self.service.collect_snapshot,
+            on_success=lambda payload: self._render_snapshot(payload),
+        )
 
     def _render_snapshot(self, snapshot: BrewSnapshot) -> None:
         if snapshot.available:
@@ -544,19 +574,11 @@ class BrewManagerApp:
             self._append_log("No package selected for details.")
             return
 
-        try:
-            details = self.service.get_package_details(
-                self._selected_package.name,
-                self._selected_package.kind,
-            )
-        except Exception as exc:  # noqa: BLE001
-            self.error_var.set(str(exc))
-            self._append_log(f"Failed to fetch details: {exc}")
-            return
-
-        self._set_text(self.details_text, details)
-        self._append_log(
-            f"Loaded details for {self._selected_package.name} ({self._selected_package.kind})."
+        selection = self._selected_package
+        self._submit_task(
+            description=f"Loading details for {selection.name}",
+            fn=lambda: self.service.get_package_details(selection.name, selection.kind),
+            on_success=lambda payload: self._handle_details_loaded(selection, str(payload)),
         )
 
     def _install_package(self) -> None:
@@ -614,14 +636,15 @@ class BrewManagerApp:
         package_name: str = "",
         package_kind: str = "formula",
     ) -> None:
-        result = self.service.run_action(
-            action,
-            package_name=package_name,
-            package_kind=package_kind,
+        self._submit_task(
+            description=f"Running {action}",
+            fn=lambda: self.service.run_action(
+                action,
+                package_name=package_name,
+                package_kind=package_kind,
+            ),
+            on_success=lambda payload: self._handle_action_result(payload),
         )
-        self._handle_command_result(result)
-        if result.succeeded:
-            self.refresh()
 
     def _handle_command_result(self, result: BrewCommandResult) -> None:
         command_text = " ".join(result.command) if result.command else "<no command>"
@@ -642,3 +665,71 @@ class BrewManagerApp:
     def _append_log(self, content: str) -> None:
         self.log_text.insert(tk.END, f"{content}\n\n")
         self.log_text.see(tk.END)
+
+    def _handle_details_loaded(self, selection: PackageSelection, details: str) -> None:
+        self._set_text(self.details_text, details)
+        self._append_log(f"Loaded details for {selection.name} ({selection.kind}).")
+
+    def _handle_action_result(self, payload: object) -> None:
+        result = payload
+        if not isinstance(result, BrewCommandResult):
+            self.error_var.set("Unexpected action result received.")
+            self._append_log("ERROR: Unexpected action result received.")
+            return
+
+        self._handle_command_result(result)
+        if result.succeeded:
+            self.refresh()
+
+    def _submit_task(
+        self,
+        description: str,
+        fn: Callable[[], object],
+        on_success: Callable[[object], None] | None = None,
+        on_error: Callable[[Exception], None] | None = None,
+    ) -> None:
+        task_id = self._task_runner.submit(description, fn)
+        self._task_handlers[task_id] = (on_success, on_error)
+
+    def _poll_task_events(self) -> None:
+        for event in self._task_runner.drain_events():
+            self._handle_task_event(event)
+        self.root.after(120, self._poll_task_events)
+
+    def _handle_task_event(self, event: TaskEvent) -> None:
+        handlers = self._task_handlers.get(event.task_id, (None, None))
+        on_success, on_error = handlers
+
+        if event.status == "started":
+            self._active_tasks.add(event.task_id)
+            self.activity_var.set(f"{event.description}...")
+            self._set_busy_state(True)
+            self._append_log(f"{event.description} started.")
+            return
+
+        self._active_tasks.discard(event.task_id)
+        if not self._active_tasks:
+            self.activity_var.set("Idle")
+            self._set_busy_state(False)
+
+        if event.status == "completed":
+            if on_success is not None:
+                on_success(event.payload)
+            self._append_log(f"{event.description} finished.")
+        elif event.status == "failed":
+            error = event.error or RuntimeError("Background task failed.")
+            if on_error is not None:
+                on_error(error)
+            else:
+                self.error_var.set(str(error))
+                self._append_log(f"ERROR: {event.description} failed: {error}")
+
+        self._task_handlers.pop(event.task_id, None)
+
+    def _set_busy_state(self, busy: bool) -> None:
+        state = tk.DISABLED if busy else tk.NORMAL
+        for button in self._action_buttons:
+            button.configure(state=state)
+
+    def _register_action_button(self, button: ttk.Button) -> None:
+        self._action_buttons.append(button)
