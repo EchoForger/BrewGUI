@@ -37,6 +37,10 @@ brew-gui
 ├── AGENT.md
 ├── README.md
 ├── docs/
+│   ├── ARCHITECTURE.md
+│   ├── PLANS.md
+│   ├── exec-plans/
+│   ├── product-specs/
 │   └── roadmap.md
 ├── pyproject.toml
 ├── src/
@@ -64,3 +68,8 @@ brew-gui
 - Uninstall the selected formula or cask with confirmation
 - View package details from `brew info`
 - Inspect a simple in-app command log
+
+## Repository Guidance
+
+- [`AGENT.md`](/Users/wuhaonan/Downloads/test/AGENT.md) is the short entry point for agents
+- Product and architecture decisions live under [`docs/`](/Users/wuhaonan/Downloads/test/docs)

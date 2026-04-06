@@ -15,6 +15,7 @@
 - Install and uninstall actions
 - Upgrade queue
 - Error reporting and logs
+- Structured repository docs for agent-first iteration
 
 ## Milestone 3
 

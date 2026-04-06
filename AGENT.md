@@ -1,26 +1,28 @@
-# Agent Notes
+# AGENT Guide
 
-## Product Direction
+This file is the table of contents for repository knowledge. Keep it short and stable.
 
-Build a desktop GUI for Homebrew that makes package management approachable and visible.
+## What This Product Is
 
-## Initial Scope
+`brew-gui` is a macOS desktop storefront for Homebrew. It should feel approachable like an app marketplace while still exposing reliable package-management controls.
 
-- Show Homebrew availability and version
-- List installed formulae and casks
-- Refresh package lists from the GUI
-- Reserve clear extension points for install, upgrade, uninstall, and diagnostics
+## Core Rules
 
-## Architecture Guidelines
+- Keep subprocess interaction inside [`src/brew_gui_manager/brew_service.py`](/Users/wuhaonan/Downloads/test/src/brew_gui_manager/brew_service.py).
+- Keep Tk widget orchestration inside [`src/brew_gui_manager/app.py`](/Users/wuhaonan/Downloads/test/src/brew_gui_manager/app.py).
+- Long-running Homebrew work must not block the Tk main thread.
+- Dangerous actions require confirmation and must leave visible logs.
+- Prefer repo-local documentation over chat-only decisions.
 
-- Keep UI code in `app.py`
-- Keep shell interaction isolated in `brew_service.py`
-- Avoid mixing subprocess calls directly into widget callbacks
-- Prefer small, testable methods over large event handlers
+## Where To Look Next
 
-## Collaboration Notes
+- Product intent: [`docs/product-specs/storefront.md`](/Users/wuhaonan/Downloads/test/docs/product-specs/storefront.md)
+- Architecture boundaries: [`docs/ARCHITECTURE.md`](/Users/wuhaonan/Downloads/test/docs/ARCHITECTURE.md)
+- Active execution plans: [`docs/PLANS.md`](/Users/wuhaonan/Downloads/test/docs/PLANS.md)
+- Milestones: [`docs/roadmap.md`](/Users/wuhaonan/Downloads/test/docs/roadmap.md)
 
-- Treat Homebrew command execution as an integration boundary
-- Mock `subprocess.run` in tests
-- Keep the first version dependency-light to simplify bootstrap on macOS
+## Current Priorities
 
+- Make all brew operations background-safe
+- Increase detail richness for selected packages
+- Keep the storefront responsive during installs, upgrades, and refreshes
