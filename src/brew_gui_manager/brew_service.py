@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 import shutil
 import subprocess
 from typing import Final
@@ -26,6 +27,21 @@ class BrewCommandResult:
     succeeded: bool
     output: str = ""
     error: str = ""
+
+
+@dataclass(slots=True)
+class PackageDetails:
+    name: str
+    kind: PackageKind
+    title: str
+    description: str
+    homepage: str
+    latest_version: str
+    installed_versions: list[str]
+    dependencies: list[str]
+    tap: str
+    caveats: str
+    raw_text: str
 
 
 class BrewService:
@@ -90,8 +106,25 @@ class BrewService:
             outdated_casks=[item for item in outdated_casks if item],
         )
 
-    def get_package_details(self, package_name: str, package_kind: PackageKind) -> str:
-        return self._run(self.executable, "info", self._kind_flag(package_kind), package_name)
+    def get_package_details(self, package_name: str, package_kind: PackageKind) -> PackageDetails:
+        try:
+            payload = self._run(self.executable, "info", "--json=v2", package_name)
+            return self._parse_package_details_json(package_name, package_kind, payload)
+        except (subprocess.CalledProcessError, json.JSONDecodeError, KeyError, IndexError, TypeError, ValueError):
+            raw_text = self._run(self.executable, "info", self._kind_flag(package_kind), package_name)
+            return PackageDetails(
+                name=package_name,
+                kind=package_kind,
+                title=package_name,
+                description="Structured metadata unavailable. Showing raw Homebrew info.",
+                homepage="",
+                latest_version="Unknown",
+                installed_versions=[],
+                dependencies=[],
+                tap="",
+                caveats="",
+                raw_text=raw_text,
+            )
 
     def run_action(
         self,
@@ -159,6 +192,77 @@ class BrewService:
     @staticmethod
     def _kind_flag(package_kind: PackageKind) -> str:
         return "--cask" if package_kind == "cask" else "--formula"
+
+    def _parse_package_details_json(
+        self,
+        package_name: str,
+        package_kind: PackageKind,
+        payload: str,
+    ) -> PackageDetails:
+        data = json.loads(payload)
+        key = "casks" if package_kind == "cask" else "formulae"
+        entries = data.get(key, [])
+        package = next(
+            (
+                item
+                for item in entries
+                if item.get("name") == package_name or item.get("token") == package_name
+            ),
+            None,
+        )
+        if package is None:
+            if not entries:
+                raise ValueError(f"No package details returned for {package_name}")
+            package = entries[0]
+
+        if package_kind == "cask":
+            installed_versions = self._parse_cask_versions(package)
+            latest_version = str(package.get("version") or "Unknown")
+            title = package.get("name") or package.get("token") or package_name
+            homepage = str(package.get("homepage") or "")
+            description = str(package.get("desc") or "No description available.")
+            dependencies = [str(item) for item in package.get("depends_on", {}).get("formula", [])]
+            tap = str(package.get("tap") or "")
+            caveats = str(package.get("caveats") or "")
+        else:
+            installed_versions = [
+                str(item.get("version"))
+                for item in package.get("installed", [])
+                if item.get("version")
+            ]
+            latest_version = str(package.get("versions", {}).get("stable") or "Unknown")
+            title = package.get("name") or package_name
+            homepage = str(package.get("homepage") or "")
+            description = str(package.get("desc") or "No description available.")
+            dependencies = [str(item) for item in package.get("dependencies", [])]
+            tap = str(package.get("tap") or "")
+            caveats = str(package.get("caveats") or "")
+
+        raw_text = self._run(self.executable, "info", self._kind_flag(package_kind), package_name)
+        return PackageDetails(
+            name=package_name,
+            kind=package_kind,
+            title=title,
+            description=description,
+            homepage=homepage,
+            latest_version=latest_version,
+            installed_versions=installed_versions,
+            dependencies=dependencies,
+            tap=tap,
+            caveats=caveats,
+            raw_text=raw_text,
+        )
+
+    @staticmethod
+    def _parse_cask_versions(package: dict) -> list[str]:
+        installed_items = package.get("installed") or []
+        versions: list[str] = []
+        for item in installed_items:
+            if isinstance(item, str):
+                versions.append(item)
+            elif isinstance(item, dict) and item.get("version"):
+                versions.append(str(item["version"]))
+        return versions
 
     def _run(self, *args: str) -> str:
         completed = subprocess.run(

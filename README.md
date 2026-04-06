@@ -66,7 +66,7 @@ brew-gui
 - Install a formula or cask from the main window
 - Upgrade all packages or just the selected package
 - Uninstall the selected formula or cask with confirmation
-- View package details from `brew info`
+- View structured package details from `brew info --json=v2` with fallback to plain text
 - Inspect a simple in-app command log
 - Run refreshes and package actions in background workers so the UI stays responsive
 

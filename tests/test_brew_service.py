@@ -54,12 +54,41 @@ class BrewServiceTests(unittest.TestCase):
 
     def test_get_package_details_for_formula(self) -> None:
         service = BrewService()
+        responses = {
+            ("brew", "info", "--json=v2", "wget"): (
+                '{"formulae":[{"name":"wget","desc":"internet retriever","homepage":"https://example.com",'
+                '"tap":"homebrew/core","versions":{"stable":"1.2.3"},"installed":[{"version":"1.2.2"}],'
+                '"dependencies":["pcre2"],"caveats":"Use responsibly"}],"casks":[]}'
+            ),
+            ("brew", "info", "--formula", "wget"): "formula details",
+        }
 
-        with patch.object(service, "_run", return_value="formula details") as run_mock:
+        with patch.object(service, "_run", side_effect=lambda *args: responses[args]) as run_mock:
             details = service.get_package_details("wget", "formula")
 
-        self.assertEqual(details, "formula details")
-        run_mock.assert_called_once_with("brew", "info", "--formula", "wget")
+        self.assertEqual(details.title, "wget")
+        self.assertEqual(details.latest_version, "1.2.3")
+        self.assertEqual(details.installed_versions, ["1.2.2"])
+        self.assertEqual(details.dependencies, ["pcre2"])
+        self.assertEqual(details.raw_text, "formula details")
+        self.assertEqual(run_mock.call_count, 2)
+
+    def test_get_package_details_falls_back_to_plain_text(self) -> None:
+        service = BrewService()
+
+        def fake_run(*args: str) -> str:
+            if args == ("brew", "info", "--json=v2", "iterm2"):
+                raise CalledProcessError(1, args, stderr="json unavailable")
+            if args == ("brew", "info", "--cask", "iterm2"):
+                return "plain text details"
+            raise AssertionError(f"Unexpected args: {args}")
+
+        with patch.object(service, "_run", side_effect=fake_run):
+            details = service.get_package_details("iterm2", "cask")
+
+        self.assertEqual(details.title, "iterm2")
+        self.assertEqual(details.description, "Structured metadata unavailable. Showing raw Homebrew info.")
+        self.assertEqual(details.raw_text, "plain text details")
 
     def test_run_action_success(self) -> None:
         service = BrewService()

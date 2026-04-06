@@ -5,7 +5,7 @@ from tkinter import messagebox
 from tkinter import ttk
 from typing import Callable
 
-from .brew_service import BrewCommandResult, BrewService, BrewSnapshot
+from .brew_service import BrewCommandResult, BrewService, BrewSnapshot, PackageDetails
 from .task_runner import BackgroundTaskRunner, TaskEvent
 from .ui_state import PackageSelection
 
@@ -28,6 +28,8 @@ class BrewManagerApp:
         self.install_name_var = tk.StringVar(value="")
         self.install_kind_var = tk.StringVar(value="formula")
         self.selection_var = tk.StringVar(value="Choose a package to see details.")
+        self.package_blurb_var = tk.StringVar(value="Select a package to see its story.")
+        self.package_meta_var = tk.StringVar(value="Latest version: -    Installed: -")
         self.summary_var = tk.StringVar(value="Formulae 0  •  Casks 0")
         self.badge_var = tk.StringVar(value="No updates available")
         self.hero_var = tk.StringVar(value="Your Homebrew apps, curated like a storefront.")
@@ -348,8 +350,8 @@ class BrewManagerApp:
         details = ttk.Frame(storefront, style="Card.TFrame", padding=20)
         details.grid(row=0, column=1, sticky="nsew")
         details.columnconfigure(0, weight=1)
-        details.rowconfigure(4, weight=1)
-        details.rowconfigure(7, weight=1)
+        details.rowconfigure(6, weight=1)
+        details.rowconfigure(8, weight=1)
 
         ttk.Label(details, text="App Page", style="Section.TLabel").grid(row=0, column=0, sticky="w")
         ttk.Label(
@@ -363,13 +365,25 @@ class BrewManagerApp:
         ).grid(row=1, column=0, sticky="w", pady=(8, 4))
         ttk.Label(
             details,
-            text="Inspect details, upgrade the selected package, or remove it from your library.",
-            style="Muted.TLabel",
+            textvariable=self.package_blurb_var,
+            background="#ffffff",
+            foreground="#475569",
+            font=("SF Pro Text", 12),
             wraplength=420,
+            justify="left",
         ).grid(row=2, column=0, sticky="w")
+        ttk.Label(
+            details,
+            textvariable=self.package_meta_var,
+            background="#ffffff",
+            foreground="#2563eb",
+            font=("SF Pro Text", 11, "bold"),
+            wraplength=420,
+            justify="left",
+        ).grid(row=3, column=0, sticky="w", pady=(8, 0))
 
         actions = ttk.Frame(details, style="Card.TFrame")
-        actions.grid(row=3, column=0, sticky="w", pady=(18, 16))
+        actions.grid(row=4, column=0, sticky="w", pady=(18, 16))
         details_button = ttk.Button(actions, text="Open Details", style="Primary.TButton", command=self._show_selected_details)
         details_button.grid(
             row=0,
@@ -402,7 +416,7 @@ class BrewManagerApp:
         self._register_action_button(cleanup_button)
 
         ttk.Label(details, text="About This Package", style="Section.TLabel").grid(
-            row=4,
+            row=5,
             column=0,
             sticky="nw",
             pady=(0, 10),
@@ -418,14 +432,14 @@ class BrewManagerApp:
             padx=16,
             pady=16,
         )
-        self.details_text.grid(row=5, column=0, sticky="nsew")
+        self.details_text.grid(row=6, column=0, sticky="nsew")
         self._set_text(
             self.details_text,
             "Select an app from the charts to load its Homebrew detail page.",
         )
 
         ttk.Label(details, text="Recent Activity", style="Section.TLabel").grid(
-            row=6,
+            row=7,
             column=0,
             sticky="w",
             pady=(16, 10),
@@ -441,7 +455,7 @@ class BrewManagerApp:
             padx=16,
             pady=16,
         )
-        self.log_text.grid(row=7, column=0, sticky="nsew")
+        self.log_text.grid(row=8, column=0, sticky="nsew")
         self._append_log("Storefront ready. Refresh to sync with Homebrew.")
 
     def _build_shelf(
@@ -564,6 +578,8 @@ class BrewManagerApp:
         name = raw_item.split(maxsplit=1)[1] if " " in raw_item else raw_item
         self._selected_package = PackageSelection(name=name, kind=package_kind)
         self.selection_var.set(f"{name}  •  {package_kind}")
+        self.package_blurb_var.set("Open Details to load the package overview from Homebrew.")
+        self.package_meta_var.set("Latest version: -    Installed: -")
         self._set_text(
             self.details_text,
             f"{name}\n\nOpen Details to load the package overview from Homebrew.",
@@ -578,7 +594,7 @@ class BrewManagerApp:
         self._submit_task(
             description=f"Loading details for {selection.name}",
             fn=lambda: self.service.get_package_details(selection.name, selection.kind),
-            on_success=lambda payload: self._handle_details_loaded(selection, str(payload)),
+            on_success=lambda payload: self._handle_details_loaded(selection, payload),
         )
 
     def _install_package(self) -> None:
@@ -666,8 +682,19 @@ class BrewManagerApp:
         self.log_text.insert(tk.END, f"{content}\n\n")
         self.log_text.see(tk.END)
 
-    def _handle_details_loaded(self, selection: PackageSelection, details: str) -> None:
-        self._set_text(self.details_text, details)
+    def _handle_details_loaded(self, selection: PackageSelection, details: object) -> None:
+        if not isinstance(details, PackageDetails):
+            self.error_var.set("Unexpected package details payload received.")
+            self._append_log("ERROR: Unexpected package details payload received.")
+            return
+
+        self.selection_var.set(f"{details.title}  •  {selection.kind}")
+        self.package_blurb_var.set(details.description)
+        installed = ", ".join(details.installed_versions) if details.installed_versions else "Not installed"
+        self.package_meta_var.set(
+            f"Latest version: {details.latest_version}    Installed: {installed}"
+        )
+        self._set_text(self.details_text, self._format_package_details(details))
         self._append_log(f"Loaded details for {selection.name} ({selection.kind}).")
 
     def _handle_action_result(self, payload: object) -> None:
@@ -733,3 +760,21 @@ class BrewManagerApp:
 
     def _register_action_button(self, button: ttk.Button) -> None:
         self._action_buttons.append(button)
+
+    @staticmethod
+    def _format_package_details(details: PackageDetails) -> str:
+        sections = [
+            f"Name: {details.name}",
+            f"Kind: {details.kind}",
+            f"Homepage: {details.homepage or 'Unavailable'}",
+            f"Tap: {details.tap or 'Unavailable'}",
+            f"Latest version: {details.latest_version}",
+            f"Installed versions: {', '.join(details.installed_versions) or 'None'}",
+            f"Dependencies: {', '.join(details.dependencies) or 'None'}",
+        ]
+        if details.caveats:
+            sections.append(f"Caveats: {details.caveats}")
+        sections.append("")
+        sections.append("Raw Homebrew Info")
+        sections.append(details.raw_text)
+        return "\n".join(sections)
