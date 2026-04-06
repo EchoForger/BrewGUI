@@ -13,180 +13,452 @@ class BrewManagerApp:
         self.root = root
         self.service = service or BrewService()
         self.root.title("Brew GUI Manager")
-        self.root.geometry("920x640")
-        self.root.minsize(760, 520)
+        self.root.geometry("1380x860")
+        self.root.minsize(1180, 720)
+        self.root.configure(bg="#f4f6fb")
+        self.root.update_idletasks()
+        self.root.deiconify()
+        self.root.lift()
 
-        self.status_var = tk.StringVar(value="Loading Homebrew status...")
+        self.status_var = tk.StringVar(value="Connecting to Homebrew...")
         self.error_var = tk.StringVar(value="")
         self.filter_var = tk.StringVar(value="")
         self.install_name_var = tk.StringVar(value="")
         self.install_kind_var = tk.StringVar(value="formula")
-        self.selection_var = tk.StringVar(value="No package selected.")
-        self.summary_var = tk.StringVar(value="Outdated formulae: 0 | Outdated casks: 0")
+        self.selection_var = tk.StringVar(value="Choose a package to see details.")
+        self.summary_var = tk.StringVar(value="Formulae 0  •  Casks 0")
+        self.badge_var = tk.StringVar(value="No updates available")
+        self.hero_var = tk.StringVar(value="Your Homebrew apps, curated like a storefront.")
+        self.category_var = tk.StringVar(value="all")
+
         self._all_formulae: list[str] = []
         self._all_casks: list[str] = []
+        self._outdated_formulae: list[str] = []
+        self._outdated_casks: list[str] = []
         self._selected_package: PackageSelection | None = None
 
+        self._configure_styles()
         self._build_layout()
         self.filter_var.trace_add("write", lambda *_: self._apply_filter())
-        self.refresh()
+        self.root.after(50, self.refresh)
+
+    def _configure_styles(self) -> None:
+        style = ttk.Style()
+        style.theme_use("clam")
+        style.configure("App.TFrame", background="#f4f6fb")
+        style.configure("Sidebar.TFrame", background="#eef2ff")
+        style.configure("Card.TFrame", background="#ffffff")
+        style.configure("SoftCard.TFrame", background="#f8fafc")
+        style.configure(
+            "Hero.TFrame",
+            background="#0f172a",
+        )
+        style.configure(
+            "Title.TLabel",
+            background="#f4f6fb",
+            foreground="#0f172a",
+            font=("SF Pro Display", 28, "bold"),
+        )
+        style.configure(
+            "Section.TLabel",
+            background="#ffffff",
+            foreground="#0f172a",
+            font=("SF Pro Display", 18, "bold"),
+        )
+        style.configure(
+            "HeroTitle.TLabel",
+            background="#0f172a",
+            foreground="#f8fafc",
+            font=("SF Pro Display", 30, "bold"),
+        )
+        style.configure(
+            "HeroBody.TLabel",
+            background="#0f172a",
+            foreground="#cbd5e1",
+            font=("SF Pro Text", 12),
+        )
+        style.configure(
+            "Muted.TLabel",
+            background="#ffffff",
+            foreground="#64748b",
+            font=("SF Pro Text", 11),
+        )
+        style.configure(
+            "SidebarTitle.TLabel",
+            background="#eef2ff",
+            foreground="#334155",
+            font=("SF Pro Text", 12, "bold"),
+        )
+        style.configure(
+            "Sidebar.TButton",
+            background="#eef2ff",
+            foreground="#1e293b",
+            borderwidth=0,
+            font=("SF Pro Text", 11),
+            padding=(16, 10),
+        )
+        style.map(
+            "Sidebar.TButton",
+            background=[("active", "#dbeafe"), ("pressed", "#bfdbfe")],
+        )
+        style.configure(
+            "Primary.TButton",
+            background="#2563eb",
+            foreground="#ffffff",
+            borderwidth=0,
+            padding=(16, 10),
+            font=("SF Pro Text", 11, "bold"),
+        )
+        style.map(
+            "Primary.TButton",
+            background=[("active", "#1d4ed8"), ("pressed", "#1e40af")],
+        )
+        style.configure(
+            "Secondary.TButton",
+            background="#e2e8f0",
+            foreground="#0f172a",
+            borderwidth=0,
+            padding=(14, 10),
+            font=("SF Pro Text", 11, "bold"),
+        )
+        style.map(
+            "Secondary.TButton",
+            background=[("active", "#cbd5e1"), ("pressed", "#94a3b8")],
+        )
+        style.configure(
+            "Category.TButton",
+            background="#ffffff",
+            foreground="#0f172a",
+            borderwidth=0,
+            padding=(14, 12),
+            font=("SF Pro Text", 11, "bold"),
+        )
+        style.map(
+            "Category.TButton",
+            background=[("active", "#dbeafe"), ("pressed", "#bfdbfe")],
+        )
 
     def _build_layout(self) -> None:
-        container = ttk.Frame(self.root, padding=16)
-        container.pack(fill=tk.BOTH, expand=True)
-        container.columnconfigure(0, weight=1)
-        container.rowconfigure(2, weight=1)
+        shell = ttk.Frame(self.root, style="App.TFrame", padding=20)
+        shell.pack(fill=tk.BOTH, expand=True)
+        shell.columnconfigure(1, weight=1)
+        shell.rowconfigure(0, weight=1)
 
-        header = ttk.Frame(container)
+        sidebar = ttk.Frame(shell, style="Sidebar.TFrame", padding=18)
+        sidebar.grid(row=0, column=0, sticky="nsw", padx=(0, 18))
+        sidebar.configure(width=220)
+        sidebar.grid_propagate(False)
+        self._build_sidebar(sidebar)
+
+        content = ttk.Frame(shell, style="App.TFrame")
+        content.grid(row=0, column=1, sticky="nsew")
+        content.columnconfigure(0, weight=1)
+        content.rowconfigure(2, weight=1)
+
+        header = ttk.Frame(content, style="App.TFrame")
         header.grid(row=0, column=0, sticky="ew")
         header.columnconfigure(0, weight=1)
-
-        ttk.Label(
-            header,
-            text="Homebrew GUI Manager",
-            font=("Helvetica", 20, "bold"),
-        ).grid(row=0, column=0, sticky="w")
-        actions = ttk.Frame(header)
-        actions.grid(row=0, column=1, sticky="e")
-        ttk.Button(actions, text="Refresh", command=self.refresh).grid(row=0, column=0)
-        ttk.Button(actions, text="Upgrade All", command=self._upgrade_all).grid(
+        ttk.Label(header, text="Brew Store", style="Title.TLabel").grid(
             row=0,
-            column=1,
-            padx=(8, 0),
-        )
-        ttk.Button(actions, text="Cleanup", command=self._cleanup).grid(
-            row=0,
-            column=2,
-            padx=(8, 0),
-        )
-
-        status_panel = ttk.Frame(container, padding=(0, 12, 0, 12))
-        status_panel.grid(row=1, column=0, sticky="ew")
-        status_panel.columnconfigure(1, weight=1)
-        status_panel.columnconfigure(3, weight=1)
-
-        ttk.Label(status_panel, text="Status:").grid(row=0, column=0, sticky="w")
-        ttk.Label(status_panel, textvariable=self.status_var).grid(
-            row=0,
-            column=1,
-            columnspan=3,
+            column=0,
             sticky="w",
         )
-        ttk.Label(status_panel, text="Filter:").grid(row=1, column=0, sticky="w")
-        ttk.Entry(status_panel, textvariable=self.filter_var).grid(
-            row=1,
-            column=1,
-            sticky="ew",
-            pady=(8, 0),
-        )
-        ttk.Label(status_panel, text="Install:").grid(row=1, column=2, sticky="e", padx=(12, 0))
-        ttk.Entry(status_panel, textvariable=self.install_name_var).grid(
-            row=1,
-            column=3,
-            sticky="ew",
-            padx=(8, 0),
-            pady=(8, 0),
-        )
-        ttk.Combobox(
-            status_panel,
+        ttk.Label(
+            header,
+            text="A Homebrew control center styled like an app marketplace.",
+            style="Muted.TLabel",
+        ).grid(row=1, column=0, sticky="w", pady=(4, 0))
+
+        self._build_hero(content)
+        self._build_storefront(content)
+
+    def _build_sidebar(self, parent: ttk.Frame) -> None:
+        ttk.Label(parent, text="Library", style="SidebarTitle.TLabel").pack(anchor="w")
+        ttk.Label(
+            parent,
+            text="Browse packages by collection and manage installs quickly.",
+            style="SidebarTitle.TLabel",
+            wraplength=180,
+        ).pack(anchor="w", pady=(8, 18))
+
+        nav_items = [
+            ("All Apps", "all"),
+            ("Formulae", "formula"),
+            ("Casks", "cask"),
+            ("Updates", "outdated"),
+        ]
+        for label, value in nav_items:
+            ttk.Button(
+                parent,
+                text=label,
+                style="Sidebar.TButton",
+                command=lambda selected=value: self._set_category(selected),
+            ).pack(fill=tk.X, pady=4)
+
+        install_card = ttk.Frame(parent, style="Card.TFrame", padding=14)
+        install_card.pack(fill=tk.X, pady=(22, 0))
+        ttk.Label(install_card, text="Quick Install", style="Section.TLabel").pack(anchor="w")
+        ttk.Label(
+            install_card,
+            text="Drop in any formula or cask and add it to your shelf.",
+            style="Muted.TLabel",
+            wraplength=170,
+        ).pack(anchor="w", pady=(4, 12))
+        install_entry = ttk.Entry(install_card, textvariable=self.install_name_var)
+        install_entry.pack(fill=tk.X)
+        kind_box = ttk.Combobox(
+            install_card,
             textvariable=self.install_kind_var,
             values=("formula", "cask"),
             state="readonly",
-            width=10,
-        ).grid(row=1, column=4, padx=(8, 0), pady=(8, 0))
-        ttk.Button(status_panel, text="Install", command=self._install_package).grid(
-            row=1,
-            column=5,
-            padx=(8, 0),
-            pady=(8, 0),
         )
-        ttk.Label(status_panel, textvariable=self.summary_var).grid(
-            row=2,
-            column=0,
-            columnspan=6,
-            sticky="w",
-            pady=(8, 0),
-        )
+        kind_box.pack(fill=tk.X, pady=(10, 10))
+        ttk.Button(
+            install_card,
+            text="Install Package",
+            style="Primary.TButton",
+            command=self._install_package,
+        ).pack(fill=tk.X)
+
+        stats_card = ttk.Frame(parent, style="SoftCard.TFrame", padding=14)
+        stats_card.pack(fill=tk.X, pady=(18, 0))
+        ttk.Label(stats_card, text="System Status", style="SidebarTitle.TLabel").pack(anchor="w")
         ttk.Label(
-            status_panel,
+            stats_card,
+            textvariable=self.status_var,
+            background="#f8fafc",
+            foreground="#0f172a",
+            wraplength=170,
+            justify="left",
+            font=("SF Pro Text", 11, "bold"),
+        ).pack(anchor="w", pady=(8, 6))
+        ttk.Label(
+            stats_card,
             textvariable=self.error_var,
-            foreground="#9a3412",
-        ).grid(row=3, column=0, columnspan=6, sticky="w", pady=(8, 0))
+            background="#f8fafc",
+            foreground="#b45309",
+            wraplength=170,
+            justify="left",
+            font=("SF Pro Text", 10),
+        ).pack(anchor="w")
 
-        content = ttk.Panedwindow(container, orient=tk.HORIZONTAL)
-        content.grid(row=2, column=0, sticky="nsew")
+    def _build_hero(self, parent: ttk.Frame) -> None:
+        hero = ttk.Frame(parent, style="Hero.TFrame", padding=22)
+        hero.grid(row=1, column=0, sticky="ew", pady=(18, 20))
+        hero.columnconfigure(0, weight=1)
+        hero.columnconfigure(1, weight=1)
 
-        left_panel = ttk.Panedwindow(content, orient=tk.HORIZONTAL)
-        self.formulae_list = self._build_list_panel(left_panel, "Formulae", "formula")
-        self.casks_list = self._build_list_panel(left_panel, "Casks", "cask")
-        content.add(left_panel, weight=3)
+        left = ttk.Frame(hero, style="Hero.TFrame")
+        left.grid(row=0, column=0, sticky="nsew", padx=(0, 20))
+        ttk.Label(left, text="Featured Collection", style="HeroTitle.TLabel").pack(anchor="w")
+        ttk.Label(
+            left,
+            textvariable=self.hero_var,
+            style="HeroBody.TLabel",
+            wraplength=460,
+            justify="left",
+        ).pack(anchor="w", pady=(12, 18))
 
-        details_panel = ttk.Frame(content, padding=8)
-        details_panel.columnconfigure(0, weight=1)
-        details_panel.rowconfigure(3, weight=1)
-        details_panel.rowconfigure(5, weight=1)
-        ttk.Label(details_panel, text="Selection", font=("Helvetica", 14, "bold")).grid(
-            row=0,
-            column=0,
-            sticky="w",
-            pady=(0, 8),
-        )
-        ttk.Label(details_panel, textvariable=self.selection_var).grid(
-            row=1,
-            column=0,
-            sticky="w",
-        )
-        buttons = ttk.Frame(details_panel)
-        buttons.grid(row=2, column=0, sticky="w", pady=(8, 8))
-        ttk.Button(buttons, text="Show Details", command=self._show_selected_details).grid(row=0, column=0)
-        ttk.Button(buttons, text="Upgrade Selected", command=self._upgrade_selected).grid(
+        controls = ttk.Frame(left, style="Hero.TFrame")
+        controls.pack(anchor="w")
+        ttk.Entry(controls, textvariable=self.filter_var, width=34).grid(row=0, column=0, padx=(0, 10))
+        ttk.Button(controls, text="Refresh", style="Primary.TButton", command=self.refresh).grid(
             row=0,
             column=1,
-            padx=(8, 0),
         )
-        ttk.Button(buttons, text="Uninstall Selected", command=self._uninstall_selected).grid(
+        ttk.Button(
+            controls,
+            text="Upgrade All",
+            style="Secondary.TButton",
+            command=self._upgrade_all,
+        ).grid(row=0, column=2, padx=(10, 0))
+
+        right = ttk.Frame(hero, style="Hero.TFrame")
+        right.grid(row=0, column=1, sticky="nsew")
+        self._build_metric_card(right, "Installed", self.summary_var, 0)
+        self._build_metric_card(right, "Updates", self.badge_var, 1)
+
+    def _build_metric_card(
+        self,
+        parent: ttk.Frame,
+        title: str,
+        variable: tk.StringVar,
+        column: int,
+    ) -> None:
+        card = tk.Frame(parent, bg="#172554", padx=18, pady=18)
+        card.grid(row=0, column=column, sticky="nsew", padx=(0 if column == 0 else 12, 0))
+        ttk.Label(
+            card,
+            text=title,
+            background="#172554",
+            foreground="#bfdbfe",
+            font=("SF Pro Text", 11, "bold"),
+        ).pack(anchor="w")
+        ttk.Label(
+            card,
+            textvariable=variable,
+            background="#172554",
+            foreground="#eff6ff",
+            font=("SF Pro Display", 16, "bold"),
+            wraplength=180,
+            justify="left",
+        ).pack(anchor="w", pady=(10, 0))
+
+    def _build_storefront(self, parent: ttk.Frame) -> None:
+        storefront = ttk.Frame(parent, style="App.TFrame")
+        storefront.grid(row=2, column=0, sticky="nsew")
+        storefront.columnconfigure(0, weight=3)
+        storefront.columnconfigure(1, weight=2)
+        storefront.rowconfigure(0, weight=1)
+
+        shelves = ttk.Frame(storefront, style="App.TFrame")
+        shelves.grid(row=0, column=0, sticky="nsew", padx=(0, 18))
+        shelves.columnconfigure(0, weight=1)
+        shelves.columnconfigure(1, weight=1)
+        shelves.rowconfigure(1, weight=1)
+
+        ttk.Label(
+            shelves,
+            text="Top Charts",
+            style="Title.TLabel",
+        ).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 10))
+
+        self.formulae_list = self._build_shelf(shelves, "Formulae", 1, 0, "formula")
+        self.casks_list = self._build_shelf(shelves, "Casks", 1, 1, "cask")
+
+        details = ttk.Frame(storefront, style="Card.TFrame", padding=20)
+        details.grid(row=0, column=1, sticky="nsew")
+        details.columnconfigure(0, weight=1)
+        details.rowconfigure(4, weight=1)
+        details.rowconfigure(7, weight=1)
+
+        ttk.Label(details, text="App Page", style="Section.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Label(
+            details,
+            textvariable=self.selection_var,
+            background="#ffffff",
+            foreground="#0f172a",
+            font=("SF Pro Display", 20, "bold"),
+            wraplength=420,
+            justify="left",
+        ).grid(row=1, column=0, sticky="w", pady=(8, 4))
+        ttk.Label(
+            details,
+            text="Inspect details, upgrade the selected package, or remove it from your library.",
+            style="Muted.TLabel",
+            wraplength=420,
+        ).grid(row=2, column=0, sticky="w")
+
+        actions = ttk.Frame(details, style="Card.TFrame")
+        actions.grid(row=3, column=0, sticky="w", pady=(18, 16))
+        ttk.Button(actions, text="Open Details", style="Primary.TButton", command=self._show_selected_details).grid(
             row=0,
-            column=2,
-            padx=(8, 0),
+            column=0,
         )
+        ttk.Button(
+            actions,
+            text="Upgrade Selected",
+            style="Secondary.TButton",
+            command=self._upgrade_selected,
+        ).grid(row=0, column=1, padx=(10, 0))
+        ttk.Button(
+            actions,
+            text="Uninstall",
+            style="Secondary.TButton",
+            command=self._uninstall_selected,
+        ).grid(row=0, column=2, padx=(10, 0))
+        ttk.Button(
+            actions,
+            text="Cleanup",
+            style="Secondary.TButton",
+            command=self._cleanup,
+        ).grid(row=0, column=3, padx=(10, 0))
 
-        self.details_text = tk.Text(details_panel, wrap="word", height=14)
-        self.details_text.grid(row=3, column=0, sticky="nsew")
-
-        ttk.Label(details_panel, text="Command Log", font=("Helvetica", 14, "bold")).grid(
+        ttk.Label(details, text="About This Package", style="Section.TLabel").grid(
             row=4,
             column=0,
-            sticky="w",
-            pady=(12, 8),
+            sticky="nw",
+            pady=(0, 10),
         )
-        self.log_text = tk.Text(details_panel, wrap="word", height=10)
-        self.log_text.grid(row=5, column=0, sticky="nsew")
-        content.add(details_panel, weight=2)
+        self.details_text = tk.Text(
+            details,
+            wrap="word",
+            height=14,
+            relief=tk.FLAT,
+            bg="#f8fafc",
+            fg="#0f172a",
+            font=("SF Pro Text", 11),
+            padx=16,
+            pady=16,
+        )
+        self.details_text.grid(row=5, column=0, sticky="nsew")
+        self._set_text(
+            self.details_text,
+            "Select an app from the charts to load its Homebrew detail page.",
+        )
 
-    def _build_list_panel(
-        self,
-        parent: ttk.Panedwindow,
-        title: str,
-        package_kind: str,
-    ) -> tk.Listbox:
-        frame = ttk.Frame(parent, padding=8)
-        frame.columnconfigure(0, weight=1)
-        frame.rowconfigure(1, weight=1)
-
-        ttk.Label(frame, text=title, font=("Helvetica", 14, "bold")).grid(
-            row=0,
+        ttk.Label(details, text="Recent Activity", style="Section.TLabel").grid(
+            row=6,
             column=0,
             sticky="w",
-            pady=(0, 8),
+            pady=(16, 10),
         )
+        self.log_text = tk.Text(
+            details,
+            wrap="word",
+            height=10,
+            relief=tk.FLAT,
+            bg="#0f172a",
+            fg="#e2e8f0",
+            font=("SF Mono", 10),
+            padx=16,
+            pady=16,
+        )
+        self.log_text.grid(row=7, column=0, sticky="nsew")
+        self._append_log("Storefront ready. Refresh to sync with Homebrew.")
 
-        listbox = tk.Listbox(frame, activestyle="none")
+    def _build_shelf(
+        self,
+        parent: ttk.Frame,
+        title: str,
+        row: int,
+        column: int,
+        package_kind: str,
+    ) -> tk.Listbox:
+        card = ttk.Frame(parent, style="Card.TFrame", padding=16)
+        card.grid(row=row, column=column, sticky="nsew", padx=(0 if column == 0 else 10, 0))
+        card.columnconfigure(0, weight=1)
+        card.rowconfigure(2, weight=1)
+
+        ttk.Label(card, text=title, style="Section.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Label(
+            card,
+            text="Browse installed packages like a ranked collection.",
+            style="Muted.TLabel",
+        ).grid(row=1, column=0, sticky="w", pady=(4, 10))
+
+        frame = tk.Frame(card, bg="#ffffff")
+        frame.grid(row=2, column=0, sticky="nsew")
+        frame.grid_columnconfigure(0, weight=1)
+        frame.grid_rowconfigure(0, weight=1)
+
+        listbox = tk.Listbox(
+            frame,
+            activestyle="none",
+            relief=tk.FLAT,
+            bg="#ffffff",
+            fg="#0f172a",
+            selectbackground="#bfdbfe",
+            selectforeground="#0f172a",
+            font=("SF Pro Text", 12),
+            highlightthickness=0,
+            bd=0,
+        )
         scrollbar = ttk.Scrollbar(frame, orient=tk.VERTICAL, command=listbox.yview)
         listbox.configure(yscrollcommand=scrollbar.set)
         listbox.bind("<<ListboxSelect>>", lambda _event: self._handle_selection(listbox, package_kind))
-        listbox.grid(row=1, column=0, sticky="nsew")
-        scrollbar.grid(row=1, column=1, sticky="ns")
-        parent.add(frame, weight=1)
+        listbox.grid(row=0, column=0, sticky="nsew")
+        scrollbar.grid(row=0, column=1, sticky="ns")
         return listbox
 
     def refresh(self) -> None:
@@ -195,26 +467,51 @@ class BrewManagerApp:
 
     def _render_snapshot(self, snapshot: BrewSnapshot) -> None:
         if snapshot.available:
-            self.status_var.set(
-                f"{snapshot.version} | Formulae: {len(snapshot.formulae)} | Casks: {len(snapshot.casks)}"
-            )
+            self.status_var.set(snapshot.version)
+            self.summary_var.set(f"Formulae {len(snapshot.formulae)}  •  Casks {len(snapshot.casks)}")
+            update_count = len(snapshot.outdated_formulae) + len(snapshot.outdated_casks)
+            self.badge_var.set(f"{update_count} package updates waiting")
+            if update_count:
+                self.hero_var.set(
+                    "Updates are ready. Open a package page, inspect details, or upgrade the whole library."
+                )
+            else:
+                self.hero_var.set("Your Homebrew library is up to date and ready to browse.")
         else:
             self.status_var.set("Homebrew unavailable")
+            self.summary_var.set("Formulae 0  •  Casks 0")
+            self.badge_var.set("Install Homebrew to unlock the catalog")
+            self.hero_var.set("Homebrew is missing from PATH, so the storefront cannot load your library yet.")
 
         self.error_var.set(snapshot.error)
         self._all_formulae = snapshot.formulae
         self._all_casks = snapshot.casks
-        self.summary_var.set(
-            f"Outdated formulae: {len(snapshot.outdated_formulae)} | Outdated casks: {len(snapshot.outdated_casks)}"
-        )
+        self._outdated_formulae = snapshot.outdated_formulae
+        self._outdated_casks = snapshot.outdated_casks
         self._apply_filter()
 
     def _apply_filter(self) -> None:
         keyword = self.filter_var.get().strip().lower()
-        formulae = self._filter_items(getattr(self, "_all_formulae", []), keyword)
-        casks = self._filter_items(getattr(self, "_all_casks", []), keyword)
+        category = self.category_var.get()
+
+        formulae_source = self._outdated_formulae if category == "outdated" else self._all_formulae
+        casks_source = self._outdated_casks if category == "outdated" else self._all_casks
+
+        formulae = self._filter_items(formulae_source, keyword)
+        casks = self._filter_items(casks_source, keyword)
+
+        if category == "formula":
+            casks = []
+        elif category == "cask":
+            formulae = []
+
         self._replace_listbox(self.formulae_list, formulae)
         self._replace_listbox(self.casks_list, casks)
+
+    def _set_category(self, category: str) -> None:
+        self.category_var.set(category)
+        self._append_log(f"Browsing category: {category}")
+        self._apply_filter()
 
     @staticmethod
     def _filter_items(items: list[str], keyword: str) -> list[str]:
@@ -225,16 +522,22 @@ class BrewManagerApp:
     @staticmethod
     def _replace_listbox(listbox: tk.Listbox, items: list[str]) -> None:
         listbox.delete(0, tk.END)
-        for item in items:
-            listbox.insert(tk.END, item)
+        for index, item in enumerate(items, start=1):
+            listbox.insert(tk.END, f"{index:02d}   {item}")
 
     def _handle_selection(self, listbox: tk.Listbox, package_kind: str) -> None:
         selection = listbox.curselection()
         if not selection:
             return
-        name = listbox.get(selection[0])
+
+        raw_item = listbox.get(selection[0])
+        name = raw_item.split(maxsplit=1)[1] if " " in raw_item else raw_item
         self._selected_package = PackageSelection(name=name, kind=package_kind)
-        self.selection_var.set(f"{name} ({package_kind})")
+        self.selection_var.set(f"{name}  •  {package_kind}")
+        self._set_text(
+            self.details_text,
+            f"{name}\n\nOpen Details to load the package overview from Homebrew.",
+        )
 
     def _show_selected_details(self) -> None:
         if self._selected_package is None:
